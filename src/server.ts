@@ -11,6 +11,14 @@ interface ServeOptions {
   port: number;
 }
 
+const MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024;
+
+class RequestBodyError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
 function setCommonHeaders(res: ServerResponse): void {
   res.setHeader("access-control-allow-origin", "*");
   res.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
@@ -30,10 +38,22 @@ function sendError(res: ServerResponse, status: number, message: string, type = 
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  let total = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buffer.length;
+    if (total > MAX_REQUEST_BODY_BYTES) {
+      throw new RequestBodyError(`Request body too large. Limit is ${MAX_REQUEST_BODY_BYTES} bytes.`, 413);
+    }
+    chunks.push(buffer);
+  }
   const raw = Buffer.concat(chunks).toString("utf8");
   if (!raw.trim()) return {};
-  return JSON.parse(raw) as unknown;
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    throw new RequestBodyError("Invalid JSON request body.", 400);
+  }
 }
 
 function requireLocalApiKey(req: IncomingMessage): string | undefined {
@@ -58,6 +78,39 @@ function listModels() {
       owned_by: `codexapiuse:${route.account.name}`,
     })),
   };
+}
+
+function editDistance(a: string, b: string): number {
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => {
+    const row = new Array<number>(b.length + 1).fill(0);
+    row[0] = i;
+    return row;
+  });
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+function unknownModelMessage(model: string, candidates: string[]): string {
+  let closest: string | undefined;
+  let best = Infinity;
+  for (const candidate of candidates) {
+    const distance = editDistance(model, candidate);
+    if (distance < best) {
+      best = distance;
+      closest = candidate;
+    }
+  }
+  const hint = closest && best <= Math.max(4, Math.floor(model.length / 3)) ? ` Did you mean "${closest}"?` : "";
+  return `Unknown or not-logged-in model: ${model}.${hint} Run "cau models" to list available model IDs.`;
 }
 
 function sseWrite(res: ServerResponse, data: unknown): void {
@@ -254,8 +307,9 @@ async function handleChatCompletions(req: IncomingMessage, res: ServerResponse):
   if (!body.model) return sendError(res, 400, "Missing model.");
 
   const config = loadConfig();
-  const route = resolveModelRoute({ ...config, accounts: config.accounts.filter(isLoggedIn) }, body.model);
-  if (!route) return sendError(res, 404, `Unknown or not-logged-in model: ${body.model}`);
+  const loggedInConfig = { ...config, accounts: config.accounts.filter(isLoggedIn) };
+  const route = resolveModelRoute(loggedInConfig, body.model);
+  if (!route) return sendError(res, 404, unknownModelMessage(body.model, allModelRoutes(loggedInConfig).map((item) => item.publicModelId)));
 
   const abort = new AbortController();
   res.on("close", () => {
@@ -412,8 +466,9 @@ async function handleResponses(req: IncomingMessage, res: ServerResponse): Promi
   if (!body.model) return sendError(res, 400, "Missing model.");
 
   const config = loadConfig();
-  const route = resolveModelRoute({ ...config, accounts: config.accounts.filter(isLoggedIn) }, body.model);
-  if (!route) return sendError(res, 404, `Unknown or not-logged-in model: ${body.model}`);
+  const loggedInConfig = { ...config, accounts: config.accounts.filter(isLoggedIn) };
+  const route = resolveModelRoute(loggedInConfig, body.model);
+  if (!route) return sendError(res, 404, unknownModelMessage(body.model, allModelRoutes(loggedInConfig).map((item) => item.publicModelId)));
 
   const abort = new AbortController();
   res.on("close", () => {
@@ -460,15 +515,31 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return sendError(res, 404, `No route for ${req.method} ${url.pathname}`);
   } catch (error) {
     if (!res.headersSent) {
-      sendError(res, 500, error instanceof Error ? error.message : String(error), "server_error");
+      if (error instanceof RequestBodyError) {
+        sendError(res, error.status, error.message);
+      } else {
+        sendError(res, 500, error instanceof Error ? error.message : String(error), "server_error");
+      }
     } else {
       res.end();
     }
   }
 }
 
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1" || normalized === "[::1]";
+}
+
 export function serve(options: ServeOptions): void {
+  if (!process.env.CODEXAPIUSE_API_KEY && !isLoopbackHost(options.host)) {
+    throw new Error("Refusing to listen on a non-loopback host without CODEXAPIUSE_API_KEY. Use --host 127.0.0.1 or set CODEXAPIUSE_API_KEY.");
+  }
   const server = createServer((req, res) => void handleRequest(req, res));
+  server.on("error", (error) => {
+    console.error(`Server error: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+  });
   server.listen(options.port, options.host, () => {
     console.log(`codexapiuse listening on http://${options.host}:${options.port}`);
     console.log("OpenAI-compatible endpoints:");

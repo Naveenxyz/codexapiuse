@@ -6,7 +6,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { addAccount, configDir, configPath, isLoggedIn, loadConfig, removeAccount, requireAccount, saveConfig } from "./config.js";
 import { loginAccount } from "./oauth.js";
-import { allModelRoutes, modelIdsForAccount } from "./models.js";
+import { allModelRoutes, modelIdsForAccount, sanitizeModelIdPart } from "./models.js";
 import { serve } from "./server.js";
 import { summarizeCodexUsage } from "./usage.js";
 import type { Account } from "./types.js";
@@ -25,6 +25,7 @@ Usage:
   codexapiuse status                Show background server status
   codexapiuse stop                  Stop background server
   codexapiuse config                Create/migrate config and print accounts.json path
+  codexapiuse doctor                Check config, aliases, and background server health
   codexapiuse limits                Alias for list
 
 Serve options:
@@ -308,6 +309,86 @@ function cmdConfig(): void {
   console.log("Edit routes/defaults in this accounts.json file to customize exposed model IDs.");
 }
 
+type DoctorLevel = "ok" | "warning" | "error";
+
+interface DoctorFinding {
+  level: DoctorLevel;
+  message: string;
+}
+
+function printFinding(finding: DoctorFinding): void {
+  const label = finding.level === "ok" ? "OK" : finding.level === "warning" ? "WARN" : "ERROR";
+  console.log(`[${label}] ${finding.message}`);
+}
+
+async function checkServerHealth(state: DaemonState | undefined): Promise<DoctorFinding> {
+  if (!state) return { level: "warning", message: "Background server is not running." };
+  if (!isProcessRunning(state.pid)) {
+    clearDaemonState();
+    return { level: "warning", message: "Background server status was stale and has been cleared." };
+  }
+  try {
+    const response = await fetch(`http://${state.host}:${state.port}/health`, { signal: AbortSignal.timeout(1000) });
+    if (response.ok) return { level: "ok", message: `Background server is reachable at http://${state.host}:${state.port}.` };
+    return { level: "warning", message: `Background server responded with HTTP ${response.status}.` };
+  } catch (error) {
+    return { level: "warning", message: `Background server is running but health check failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+async function cmdDoctor(): Promise<void> {
+  const findings: DoctorFinding[] = [];
+  const config = loadConfig();
+  findings.push({ level: "ok", message: `Config loaded: ${configPath()}` });
+
+  if (config.accounts.length === 0) {
+    findings.push({ level: "warning", message: "No accounts configured. Add one with: cau add <name>" });
+  } else {
+    findings.push({ level: "ok", message: `${config.accounts.length} account(s) configured.` });
+  }
+
+  const prefixes = new Map<string, string>();
+  const generatedModelIds = new Map<string, string>();
+  for (const account of config.accounts) {
+    const prefix = sanitizeModelIdPart(account.name);
+    if (!prefix) {
+      findings.push({ level: "error", message: `Account ${account.id} (${account.name}) cannot produce valid model IDs.` });
+      continue;
+    }
+    const existing = prefixes.get(prefix);
+    if (existing) {
+      findings.push({ level: "error", message: `Accounts "${existing}" and "${account.name}" share model alias prefix "${prefix}".` });
+    } else {
+      prefixes.set(prefix, account.name);
+    }
+    for (const modelId of modelIdsForAccount(account, config.defaults)) {
+      const previous = generatedModelIds.get(modelId);
+      if (previous) {
+        findings.push({ level: "error", message: `Generated model ID collision: "${modelId}" from "${previous}" and "${account.name}".` });
+      } else {
+        generatedModelIds.set(modelId, account.name);
+      }
+    }
+  }
+
+  for (const routeId of Object.keys(config.routes || {})) {
+    if (generatedModelIds.has(routeId)) {
+      findings.push({ level: "warning", message: `Custom route "${routeId}" is shadowed by an account-name model ID.` });
+    }
+  }
+
+  const loggedInAccounts = config.accounts.filter(isLoggedIn);
+  if (loggedInAccounts.length === 0) {
+    findings.push({ level: "warning", message: "No logged-in accounts; /v1/models will be empty." });
+  } else {
+    const modelCount = allModelRoutes({ ...config, accounts: loggedInAccounts }).length;
+    findings.push({ level: "ok", message: `${loggedInAccounts.length} logged-in account(s), ${modelCount} exposed model ID(s).` });
+  }
+
+  findings.push(await checkServerHealth(readDaemonState()));
+  for (const finding of findings) printFinding(finding);
+  if (findings.some((finding) => finding.level === "error")) process.exitCode = 1;
+}
 
 async function main(): Promise<void> {
   const [, , command, ...args] = process.argv;
@@ -346,6 +427,10 @@ async function main(): Promise<void> {
       return;
     case "config":
       cmdConfig();
+      return;
+    case "doctor":
+    case "check":
+      await cmdDoctor();
       return;
     case "limits":
     case "limit":

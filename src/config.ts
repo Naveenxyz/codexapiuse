@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSy
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Account, ConfigFile, ReasoningEffort } from "./types.js";
-import { DEFAULT_CODEX_MODELS, DEFAULT_REASONING_LEVELS } from "./models.js";
+import { DEFAULT_CODEX_MODELS, DEFAULT_REASONING_LEVELS, sanitizeModelIdPart, validateAccountModelIdPart } from "./models.js";
 
 const DEFAULT_CONFIG: ConfigFile = {
   version: 1,
@@ -106,9 +106,14 @@ export function requireAccount(config: ConfigFile, idOrName: string | number | u
 export function addAccount(name: string): Account {
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Account name is required.");
+  const sanitized = validateAccountModelIdPart(trimmed);
   const config = loadConfig();
   if (config.accounts.some((a) => a.name === trimmed)) {
     throw new Error(`Account name already exists: ${trimmed}`);
+  }
+  const colliding = config.accounts.find((a) => sanitizeModelIdPart(a.name) === sanitized);
+  if (colliding) {
+    throw new Error(`Account name collides with existing model alias prefix: ${colliding.name}`);
   }
   const now = new Date().toISOString();
   const account: Account = {

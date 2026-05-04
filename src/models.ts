@@ -56,6 +56,14 @@ export function sanitizeModelIdPart(value: string): string {
     .replace(/-+/g, "-");
 }
 
+export function validateAccountModelIdPart(name: string): string {
+  const sanitized = sanitizeModelIdPart(name);
+  if (!sanitized) {
+    throw new Error("Account name must contain at least one letter or number.");
+  }
+  return sanitized;
+}
+
 function accountNameModelId(account: Pick<Account, "name">, codexModel: string, reasoning: ReasoningEffort): string {
   return `${sanitizeModelIdPart(account.name)}-${codexModel}-${reasoning}`;
 }
