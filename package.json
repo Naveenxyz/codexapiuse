@@ -1,0 +1,39 @@
+{
+  "name": "codexapiuse",
+  "version": "0.1.0",
+  "description": "Terminal-first ChatGPT Codex OAuth accounts exposed as an OpenAI-compatible local API gateway",
+  "type": "module",
+  "bin": {
+    "codexapiuse": "dist/cli.js",
+    "cau": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node -e \"require(\\\"fs\\\").chmodSync(\\\"dist/cli.js\\\",0o755)\"",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js serve",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "codex",
+    "chatgpt",
+    "openai-compatible",
+    "terminal",
+    "oauth"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  }
+}
