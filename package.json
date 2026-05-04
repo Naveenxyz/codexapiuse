@@ -1,8 +1,16 @@
 {
   "name": "codexapiuse",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Terminal-first ChatGPT Codex OAuth accounts exposed as an OpenAI-compatible local API gateway",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Naveenxyz/codexapiuse.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Naveenxyz/codexapiuse/issues"
+  },
+  "homepage": "https://github.com/Naveenxyz/codexapiuse#readme",
   "bin": {
     "codexapiuse": "dist/cli.js",
     "cau": "dist/cli.js"
@@ -26,8 +34,11 @@
     "terminal",
     "oauth"
   ],
-  "author": "",
+  "author": "Naveen Battula",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=20"
   },

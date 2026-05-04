@@ -45,6 +45,21 @@ Default reasoning aliases follow the pi Codex provider: `minimal`, `low`, `mediu
 
 You can edit the global model/reasoning lists in `accounts.json`.
 
+## Install
+
+After the package is published:
+
+```bash
+npm install -g codexapiuse
+```
+
+Both commands are available:
+
+```bash
+codexapiuse help
+cau help
+```
+
 ## Install for development
 
 ```bash
@@ -69,6 +84,14 @@ cau login norms
 cau serve --port 3145
 ```
 
+Run in the background:
+
+```bash
+cau serve bg
+cau status
+cau stop
+```
+
 Then configure any OpenAI-compatible client:
 
 ```text
@@ -82,6 +105,7 @@ Endpoints:
 ```text
 GET  /v1/models
 POST /v1/chat/completions
+POST /v1/responses
 ```
 
 Both streaming and non-streaming Chat Completions are supported. The OpenAI Responses endpoint (`/v1/responses`) is also supported for Factory/Droid's `provider: "openai"` custom models.
@@ -94,10 +118,31 @@ cau list                  List accounts and current Codex usage
 cau models                Print logged-in model IDs only
 cau login [id|name]       Login selected account through ChatGPT OAuth
 cau remove <id|name>      Remove an account from local config
-cau serve [--host --port] Start the local API server
+cau serve [--host --port] Start the local API server in the foreground
+cau serve bg [--host --port]
+                          Start the local API server in the background
+cau status                Show background server status
+cau stop                  Stop background server
 cau config                Create/migrate config and print accounts.json path
 cau limits                Alias for list
 ```
+
+## Release
+
+Publishing is handled by `.github/workflows/deploy-to-npm.yml`.
+
+Setup required once:
+
+1. Create an npm automation token.
+2. Add it to the GitHub repository as `NPM_TOKEN`.
+
+To publish the current `package.json` version to npm, push a commit to `main` whose commit message contains:
+
+```text
+#deploy-to-prod
+```
+
+The workflow runs `npm ci`, `npm run typecheck`, `npm run build`, uploads the `npm pack` tarball as a GitHub Actions artifact, and publishes to npm with provenance.
 
 ## Local config and custom routing
 
