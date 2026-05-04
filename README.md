@@ -110,6 +110,89 @@ POST /v1/responses
 
 Both streaming and non-streaming Chat Completions are supported. The OpenAI Responses endpoint (`/v1/responses`) is also supported for Factory/Droid's `provider: "openai"` custom models.
 
+## Factory AI Droid custom model example
+
+`codexapiuse` works well as a local custom model backend for Factory AI Droid because it exposes Codex through OpenAI-compatible endpoints.
+
+### 1. Start the local gateway
+
+Login once:
+
+```bash
+cau add norms
+cau login norms
+```
+
+Start the server in the background:
+
+```bash
+cau serve bg --port 3145
+cau status
+```
+
+Confirm the model ID you want to use:
+
+```bash
+cau models
+```
+
+Example output:
+
+```text
+norms-gpt-5.5-medium
+```
+
+### 2. Add a Factory custom model
+
+In Factory, create a custom OpenAI-compatible model with:
+
+```text
+Provider: OpenAI / OpenAI-compatible
+Base URL: http://127.0.0.1:3145/v1
+API key: anything
+Model: norms-gpt-5.5-medium
+```
+
+Use the account/model/reasoning alias from `cau models` as the model name.
+
+### 3. Optional local API key
+
+By default, `codexapiuse` accepts any API key for local convenience. To require a local key:
+
+```bash
+export CODEXAPIUSE_API_KEY='some-local-secret'
+cau serve bg --port 3145
+```
+
+Then configure Factory with:
+
+```text
+API key: some-local-secret
+```
+
+### 4. Recommended Droid settings
+
+Use `provider: "openai"` / OpenAI-compatible mode and keep the base URL ending in `/v1`.
+
+`codexapiuse` supports:
+
+```text
+GET  /v1/models
+POST /v1/chat/completions
+POST /v1/responses
+```
+
+For Factory/Droid usage, `/v1/responses` is preferred when available because `codexapiuse` forwards `prompt_cache_key` as Codex session headers, which helps upstream prompt caching work across long agent sessions.
+
+### 5. Maintenance commands
+
+```bash
+cau status        # check whether the background gateway is running
+cau limits        # inspect account usage/limits
+cau stop          # stop the background gateway
+cau serve bg      # start it again
+```
+
 ## Commands
 
 ```text
