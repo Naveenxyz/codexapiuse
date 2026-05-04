@@ -53,6 +53,48 @@ To use another account, create another custom model:
 Model: personal-gpt-5.5-medium
 ```
 
+## Example `settings.json`
+
+Factory stores custom models in `~/.factory/settings.json` under `customModels`.
+
+Example:
+
+```json
+{
+  "customModels": [
+    {
+      "model": "work-gpt-5.5-low",
+      "displayName": "work GPT-5.5 Low",
+      "baseUrl": "http://127.0.0.1:3145/v1",
+      "apiKey": "codexapiuse-local",
+      "provider": "openai",
+      "maxOutputTokens": 16384,
+      "noImageSupport": true
+    },
+    {
+      "model": "work-gpt-5.5-medium",
+      "displayName": "work GPT-5.5 Medium",
+      "baseUrl": "http://127.0.0.1:3145/v1",
+      "apiKey": "codexapiuse-local",
+      "provider": "openai",
+      "maxOutputTokens": 16384,
+      "noImageSupport": true
+    },
+    {
+      "model": "personal-gpt-5.5-medium",
+      "displayName": "personal GPT-5.5 Medium",
+      "baseUrl": "http://127.0.0.1:3145/v1",
+      "apiKey": "codexapiuse-local",
+      "provider": "openai",
+      "maxOutputTokens": 16384,
+      "noImageSupport": true
+    }
+  ]
+}
+```
+
+Use any string for `apiKey` unless you start `codexapiuse` with `CODEXAPIUSE_API_KEY`. If you do set `CODEXAPIUSE_API_KEY`, use that same value here.
+
 ## Optional local API key
 
 By default, local endpoints accept any API key. To require one:
