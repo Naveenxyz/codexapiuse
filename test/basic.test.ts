@@ -12,6 +12,7 @@ import { modelIdsForAccount, sanitizeModelIdPart } from "../src/models.js";
 import { serve } from "../src/server.js";
 
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
+const cliPath = resolve(projectRoot, "src/cli.ts");
 
 function tempHome(): string {
   return mkdtempSync(join(tmpdir(), "codexapiuse-test-"));
@@ -45,7 +46,6 @@ async function freePort(): Promise<number> {
 }
 
 async function startServer(home: string, port: number): Promise<ChildProcessWithoutNullStreams> {
-  const cliPath = resolve(projectRoot, "src/cli.ts");
   const child = spawn(process.execPath, ["--import", "tsx", cliPath, "serve", "--port", String(port)], {
     cwd: projectRoot,
     env: { ...process.env, CODEXAPIUSE_HOME: home, CODEXAPIUSE_API_KEY: "" },
@@ -94,6 +94,34 @@ test("addAccount rejects sanitized alias collisions", async () => {
     assert.throws(() => addAccount("work-account"), /collides/);
   });
   rmSync(home, { recursive: true, force: true });
+});
+
+test("quickstart rejects args and non-interactive usage", async () => {
+  const home = tempHome();
+  try {
+    const withArgs = spawn(process.execPath, ["--import", "tsx", cliPath, "quickstart", "work"], {
+      cwd: projectRoot,
+      env: { ...process.env, CODEXAPIUSE_HOME: home },
+    });
+    let argOutput = "";
+    withArgs.stderr.on("data", (chunk: Buffer) => { argOutput += chunk.toString("utf8"); });
+    const argCode = await new Promise<number | null>((resolvePromise) => withArgs.once("exit", resolvePromise));
+    assert.notEqual(argCode, 0);
+    assert.match(argOutput, /Usage: codexapiuse quickstart/);
+
+    const nonInteractive = spawn(process.execPath, ["--import", "tsx", cliPath, "quickstart"], {
+      cwd: projectRoot,
+      env: { ...process.env, CODEXAPIUSE_HOME: home },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let outputText = "";
+    nonInteractive.stderr.on("data", (chunk: Buffer) => { outputText += chunk.toString("utf8"); });
+    const code = await new Promise<number | null>((resolvePromise) => nonInteractive.once("exit", resolvePromise));
+    assert.notEqual(code, 0);
+    assert.match(outputText, /quickstart requires an interactive terminal/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("buildCodexBody converts chat messages to Codex Responses input", () => {

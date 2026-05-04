@@ -19,6 +19,7 @@ Usage:
   codexapiuse list                  List accounts and current usage
   codexapiuse models                Print model IDs only
   codexapiuse login [id|name]       Login selected account through ChatGPT OAuth
+  codexapiuse quickstart           Guided setup
   codexapiuse remove <id|name>      Remove an account from local config
   codexapiuse serve [options]       Start local OpenAI-compatible API server
   codexapiuse serve bg [options]    Start API server in the background
@@ -38,10 +39,10 @@ Environment:
 
 Factory/custom OpenAI endpoint:
   Base URL: http://127.0.0.1:3145/v1
-  Models:   <account-name>-<codex-model>-low|medium|high
+  Models:   work-gpt-5.5-medium, personal-gpt-5.5-medium, ...
 
 Edit accounts.json routes to add custom aliases, e.g.
-  "norm-gpt-5.5-low": { "account": "norms", "model": "gpt-5.5", "reasoning": "low" }
+  "work-gpt-5.5-low": { "account": "work", "model": "gpt-5.5", "reasoning": "low" }
 
 Config file:
   ${configPath()}`);
@@ -128,6 +129,155 @@ function cmdAdd(name: string | undefined): void {
   console.log("Future model IDs after login:");
   const config = loadConfig();
   for (const model of modelIdsForAccount(account, config.defaults)) console.log(`  ${model}`);
+}
+
+function publicModelExamples(accounts: Account[]): string[] {
+  const config = loadConfig();
+  return accounts
+    .flatMap((account) => modelIdsForAccount(account, config.defaults))
+    .filter((id) => id.endsWith("gpt-5.5-medium"))
+    .slice(0, 4);
+}
+
+async function ask(question: string): Promise<string> {
+  const rl = createInterface({ input, output });
+  try {
+    return await rl.question(question);
+  } finally {
+    rl.close();
+  }
+}
+
+function ensureQuickstartAccount(name: string): Account {
+  const config = loadConfig();
+  const existing = config.accounts.find((account) => account.name === name || sanitizeModelIdPart(account.name) === sanitizeModelIdPart(name));
+  if (existing) {
+    console.log(`Using existing account ${existing.id} (${existing.name}).`);
+    return existing;
+  }
+  const account = addAccount(name);
+  console.log(`Added account ${account.id} (${account.name}).`);
+  return account;
+}
+
+function isYes(answer: string): boolean {
+  return answer.trim().toLowerCase().startsWith("y");
+}
+
+function isNo(answer: string): boolean {
+  return answer.trim().toLowerCase().startsWith("n");
+}
+
+async function collectInteractiveQuickstartAccounts(): Promise<Account[]> {
+  const selected: Account[] = [];
+  while (true) {
+    const config = loadConfig();
+    if (config.accounts.length > 0) {
+      console.log("\nExisting accounts:");
+      for (const account of config.accounts) {
+        console.log(`  ${account.id}. ${account.name}${isLoggedIn(account) ? " [logged in]" : ""}`);
+      }
+    }
+
+    const prompt = config.accounts.length === 0 ? "\nAdd an account now? [Y/n] " : "\nAdd another account? [y/N] ";
+    const answer = await ask(prompt);
+    const shouldAdd = answer.trim() === "" ? config.accounts.length === 0 : isYes(answer);
+    if (!shouldAdd || isNo(answer)) break;
+
+    const name = (await ask("Account name (for example: work, personal): ")).trim();
+    if (!name) {
+      console.log("Account name is required.");
+      continue;
+    }
+    selected.push(ensureQuickstartAccount(name));
+  }
+  return selected;
+}
+
+function printClientSettings(accounts: Account[]): void {
+  const examples = publicModelExamples(accounts);
+  console.log("\nUse this in any OpenAI-compatible client:");
+  console.log("  Base URL: http://127.0.0.1:3145/v1");
+  console.log("  API key: anything, unless CODEXAPIUSE_API_KEY is set");
+  if (examples.length > 0) {
+    console.log(`  Model: ${examples[0]}`);
+    if (examples.length > 1) {
+      console.log("\nOther example models:");
+      for (const model of examples.slice(1)) console.log(`  ${model}`);
+    }
+  } else {
+    console.log("  Model: run cau models after logging in");
+  }
+}
+
+function printUsefulCommands(): void {
+  console.log("\nUseful commands:");
+  console.log("  cau help         Show command help");
+  console.log("  cau serve        Start the API server in the foreground");
+  console.log("  cau serve bg     Start the API server in the background");
+  console.log("  cau status       Check background server status");
+  console.log("  cau stop         Stop the background server");
+  console.log("  cau list         Show accounts and usage");
+  console.log("  cau models       Print model IDs");
+  console.log("  cau doctor       Check config and server health");
+}
+
+async function cmdQuickstart(args: string[]): Promise<void> {
+  if (args.length > 0) throw new Error("Usage: codexapiuse quickstart");
+  const config = loadConfig();
+  saveConfig(config);
+
+  console.log("codexapiuse quickstart\n");
+  console.log(`Config: ${configPath()}`);
+
+  if (!input.isTTY) throw new Error("quickstart requires an interactive terminal. Use cau add <name>, cau login <name>, and cau serve bg instead.");
+  await collectInteractiveQuickstartAccounts();
+
+  let configuredAccounts = loadConfig().accounts;
+  if (configuredAccounts.length === 0) {
+    console.log("\nNo accounts configured. Run cau quickstart again or add one with: cau add <name>");
+    printUsefulCommands();
+    return;
+  }
+
+  const skippedLogins: Account[] = [];
+  for (const account of configuredAccounts) {
+    const latest = requireAccount(loadConfig(), account.id);
+    if (isLoggedIn(latest)) {
+      console.log(`Account ${latest.id} (${latest.name}) is already logged in.`);
+      continue;
+    }
+    const answer = await ask(`Login to ${latest.name} now? [Y/n] `);
+    const shouldLogin = answer.trim() === "" || isYes(answer);
+    if (shouldLogin && !isNo(answer)) {
+      await loginAccount(latest);
+    } else {
+      console.log(`Login skipped. Later: cau login ${latest.name}`);
+      skippedLogins.push(latest);
+    }
+  }
+
+  if (skippedLogins.length > 0) {
+    console.log("\nSkipped account logins:");
+    for (const account of skippedLogins) console.log(`  cau login ${account.name}`);
+  }
+
+  const existing = readDaemonState();
+  if (existing && isProcessRunning(existing.pid)) {
+    console.log(`Background server already running at http://${existing.host}:${existing.port}.`);
+  } else {
+    const answer = await ask("Start the local API server in the background now? [Y/n] ");
+    const shouldStart = answer.trim() === "" || isYes(answer);
+    if (shouldStart && !isNo(answer)) {
+      await cmdServeBg([]);
+    } else {
+      console.log("Server not started. Later: cau serve bg");
+    }
+  }
+
+  configuredAccounts = loadConfig().accounts;
+  printClientSettings(configuredAccounts);
+  printUsefulCommands();
 }
 
 function cmdRemove(idOrName: string | undefined): void {
@@ -411,6 +561,10 @@ async function main(): Promise<void> {
       return;
     case "login":
       await cmdLogin(args[0]);
+      return;
+    case "quickstart":
+    case "quick-start":
+      await cmdQuickstart(args);
       return;
     case "remove":
     case "rm":

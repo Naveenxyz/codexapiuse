@@ -1,6 +1,6 @@
 {
   "name": "codexapiuse",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Terminal-first ChatGPT Codex OAuth accounts exposed as an OpenAI-compatible local API gateway",
   "type": "module",
   "repository": {
@@ -17,6 +17,7 @@
   },
   "files": [
     "dist",
+    "docs",
     "README.md",
     "LICENSE"
   ],
