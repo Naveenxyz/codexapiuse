@@ -176,7 +176,7 @@ function getTextDelta(event: CodexEvent): string | undefined {
 
 function getUsage(event: CodexEvent): Record<string, unknown> | undefined {
   const response = getNestedRecord(event, "response");
-  const usage = response?.usage as Record<string, unknown> | undefined;
+  const usage = normalizeUsageCacheCreation(response?.usage);
   if (!usage) return undefined;
   const input = typeof usage.input_tokens === "number" ? usage.input_tokens : 0;
   const output = typeof usage.output_tokens === "number" ? usage.output_tokens : 0;
@@ -190,6 +190,51 @@ function getUsage(event: CodexEvent): Record<string, unknown> | undefined {
     ...(inputDetails ? { prompt_tokens_details: inputDetails } : {}),
     ...(outputDetails ? { completion_tokens_details: outputDetails } : {}),
   };
+}
+
+function numberFromRecord(record: Record<string, unknown> | undefined, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = record?.[key];
+    if (typeof value === "number") return value;
+  }
+  return undefined;
+}
+
+function normalizeUsageCacheCreation(usage: unknown): Record<string, unknown> | undefined {
+  if (!usage || typeof usage !== "object" || Array.isArray(usage)) return undefined;
+  const out: Record<string, unknown> = { ...usage as Record<string, unknown> };
+  const inputDetails = out.input_tokens_details && typeof out.input_tokens_details === "object" && !Array.isArray(out.input_tokens_details)
+    ? { ...out.input_tokens_details as Record<string, unknown> }
+    : undefined;
+  const promptDetails = out.prompt_tokens_details && typeof out.prompt_tokens_details === "object" && !Array.isArray(out.prompt_tokens_details)
+    ? { ...out.prompt_tokens_details as Record<string, unknown> }
+    : undefined;
+  const cacheWrite = numberFromRecord(inputDetails, ["cache_write_tokens", "cache_creation_tokens", "cache_creation_input_tokens"])
+    ?? numberFromRecord(promptDetails, ["cache_write_tokens", "cache_creation_tokens", "cache_creation_input_tokens"])
+    ?? numberFromRecord(out, ["cache_creation_input_tokens", "cache_write_input_tokens", "cache_write_tokens"]);
+  if (cacheWrite !== undefined) {
+    out.cache_creation_input_tokens = cacheWrite;
+    if (inputDetails) {
+      inputDetails.cache_write_tokens = cacheWrite;
+      inputDetails.cache_creation_tokens = cacheWrite;
+      inputDetails.cache_creation_input_tokens = cacheWrite;
+      out.input_tokens_details = inputDetails;
+    }
+    if (promptDetails) {
+      promptDetails.cache_write_tokens = cacheWrite;
+      promptDetails.cache_creation_tokens = cacheWrite;
+      promptDetails.cache_creation_input_tokens = cacheWrite;
+      out.prompt_tokens_details = promptDetails;
+    }
+  }
+  return out;
+}
+
+function normalizeResponseUsage(event: CodexEvent): CodexEvent {
+  const response = getNestedRecord(event, "response");
+  const usage = normalizeUsageCacheCreation(response?.usage);
+  if (!response || !usage) return event;
+  return { ...event, response: { ...response, usage } };
 }
 
 function getFinishReason(event: CodexEvent, hasToolCalls: boolean): "stop" | "length" | "tool_calls" {
@@ -627,7 +672,7 @@ async function streamResponses(res: ServerResponse, codexResponse: Response, too
   res.setHeader("connection", "keep-alive");
   res.flushHeaders?.();
   for await (const event of parseSse(codexResponse)) {
-    sseWriteResponseEvent(res, restoreResponseEventToolNames(event, toolNameMaps));
+    sseWriteResponseEvent(res, restoreResponseEventToolNames(normalizeResponseUsage(event), toolNameMaps));
     if (isTerminalResponseEvent(event)) break;
   }
   res.write("data: [DONE]\n\n");
@@ -819,7 +864,7 @@ export async function collectResponse(route: ModelRoute, codexResponse: Response
       const response = event.response as Record<string, unknown> | undefined;
       if (typeof response?.id === "string") responseId = response.id;
       if (typeof response?.status === "string") status = response.status;
-      usage = response?.usage as Record<string, unknown> | undefined;
+      usage = normalizeUsageCacheCreation(response?.usage);
       break;
     } else if (event.type === "error" || event.type === "response.failed") {
       status = "failed";

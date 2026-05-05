@@ -319,7 +319,7 @@ test("collectChatCompletion keeps interleaved parallel tool call arguments separ
     { type: "response.function_call_arguments.delta", item_id: "fc_a", output_index: 0, delta: "{\"a\":" },
     { type: "response.function_call_arguments.done", item_id: "fc_a", output_index: 0, arguments: "{\"a\":1}" },
     { type: "response.function_call_arguments.done", item_id: "fc_b", output_index: 1, arguments: "{\"b\":2}" },
-    { type: "response.completed", response: { status: "completed" } },
+    { type: "response.completed", response: { status: "completed", usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12, input_tokens_details: { cached_tokens: 4, cache_write_tokens: 3 } } } },
   ]));
 
   assert.equal(body.choices[0].finish_reason, "tool_calls");
@@ -327,6 +327,12 @@ test("collectChatCompletion keeps interleaved parallel tool call arguments separ
     { id: "call_a", type: "function", function: { name: "first", arguments: "{\"a\":1}" } },
     { id: "call_b", type: "function", function: { name: "second", arguments: "{\"b\":2}" } },
   ]);
+  assert.deepEqual(body.usage, {
+    prompt_tokens: 10,
+    completion_tokens: 2,
+    total_tokens: 12,
+    prompt_tokens_details: { cached_tokens: 4, cache_write_tokens: 3, cache_creation_tokens: 3, cache_creation_input_tokens: 3 },
+  });
 });
 
 test("collectChatCompletion restores shortened tool names and image outputs", async () => {
@@ -405,7 +411,7 @@ test("collectResponse reduces reasoning, message, and interleaved function call 
       item: { type: "message", id: "msg_1", role: "assistant", status: "completed", content: [{ type: "output_text", text: "hello", annotations: [] }] },
     },
     { type: "response.output_item.done", output_index: 3, item: { type: "image_generation_call", id: "img_1", result: "abc", output_format: "png" } },
-    { type: "response.completed", response: { id: "resp_test", status: "completed", usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 } } },
+    { type: "response.completed", response: { id: "resp_test", status: "completed", usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12, input_tokens_details: { cached_tokens: 4, cache_write_tokens: 3 } } } },
   ]));
 
   assert.equal(body.id, "resp_test");
@@ -416,7 +422,13 @@ test("collectResponse reduces reasoning, message, and interleaved function call 
     { type: "function_call", id: "fc_1", call_id: "call_1", name: "lookup", arguments: "{\"q\":\"pong\"}" },
     { type: "image_generation_call", id: "img_1", result: "abc", output_format: "png" },
   ]);
-  assert.deepEqual(body.usage, { input_tokens: 1, output_tokens: 2, total_tokens: 3 });
+  assert.deepEqual(body.usage, {
+    input_tokens: 10,
+    output_tokens: 2,
+    total_tokens: 12,
+    input_tokens_details: { cached_tokens: 4, cache_write_tokens: 3, cache_creation_tokens: 3, cache_creation_input_tokens: 3 },
+    cache_creation_input_tokens: 3,
+  });
 });
 
 test("collectResponse and stream passthrough restore shortened Responses tool names", async () => {
