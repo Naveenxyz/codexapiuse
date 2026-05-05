@@ -4,6 +4,8 @@ import { refreshCredentials } from "./oauth.js";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const JWT_AUTH_CLAIM = "https://api.openai.com/auth";
+const MAX_RETRIES = 3;
+const BASE_RETRY_DELAY_MS = 1000;
 
 export interface CodexEvent {
   type?: string;
@@ -69,29 +71,73 @@ function codexHeaders(account: Account, sessionId?: string): Headers {
   return headers;
 }
 
+function isRetryableCodexStatus(status: number, errorText: string): boolean {
+  if (status === 429 || status === 500 || status === 502 || status === 503 || status === 504) return true;
+  return /rate.?limit|overloaded|service.?unavailable|upstream.?connect|connection.?refused/i.test(errorText);
+}
+
+async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error("Request was aborted"));
+      return;
+    }
+    const cleanup = () => signal?.removeEventListener("abort", onAbort);
+    const timeout = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timeout);
+      cleanup();
+      reject(new Error("Request was aborted"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 export async function fetchCodexResponses(route: ModelRoute, body: Record<string, unknown>, signal?: AbortSignal, sessionId?: string): Promise<Response> {
   let account = await ensureFreshAccount(route.account);
-  let response = await fetch(codexUrl(), {
-    method: "POST",
-    headers: codexHeaders(account, sessionId),
-    body: JSON.stringify(body),
-    signal,
-  });
+  const bodyJson = JSON.stringify(body);
+  let didAuthRefresh = false;
 
-  // One explicit refresh/retry on auth failure. No smart account rotation.
-  if ((response.status === 401 || response.status === 403) && account.refresh) {
-    const next = await refreshCredentials(account.refresh);
-    account = { ...account, access: next.access, refresh: next.refresh, expires: next.expires, accountId: next.accountId };
-    updateAccount(account);
-    response = await fetch(codexUrl(), {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    let response = await fetch(codexUrl(), {
       method: "POST",
       headers: codexHeaders(account, sessionId),
-      body: JSON.stringify(body),
+      body: bodyJson,
       signal,
     });
+
+    // One explicit refresh/retry on auth failure. No smart account rotation.
+    if ((response.status === 401 || response.status === 403) && account.refresh && !didAuthRefresh) {
+      didAuthRefresh = true;
+      const next = await refreshCredentials(account.refresh);
+      account = { ...account, access: next.access, refresh: next.refresh, expires: next.expires, accountId: next.accountId };
+      updateAccount(account);
+      response = await fetch(codexUrl(), {
+        method: "POST",
+        headers: codexHeaders(account, sessionId),
+        body: bodyJson,
+        signal,
+      });
+    }
+
+    if (response.ok || attempt === MAX_RETRIES) return response;
+
+    const text = await response.clone().text().catch(() => "");
+    if (!isRetryableCodexStatus(response.status, text)) return response;
+    await sleep(BASE_RETRY_DELAY_MS * 2 ** attempt, signal);
   }
 
-  return response;
+  throw new Error("Codex request failed after retries.");
+}
+
+class CodexProtocolError extends Error {
+  constructor(message: string, readonly payload?: unknown) {
+    super(message);
+    this.name = "CodexProtocolError";
+  }
 }
 
 export async function* parseSse(response: Response): AsyncGenerator<CodexEvent> {
@@ -117,7 +163,11 @@ export async function* parseSse(response: Response): AsyncGenerator<CodexEvent> 
           .join("\n")
           .trim();
         if (data && data !== "[DONE]") {
-          yield JSON.parse(data) as CodexEvent;
+          try {
+            yield JSON.parse(data) as CodexEvent;
+          } catch (error) {
+            throw new CodexProtocolError(`Invalid Codex SSE JSON: ${error instanceof Error ? error.message : String(error)}`, data);
+          }
         }
         boundary = buffer.indexOf("\n\n");
       }

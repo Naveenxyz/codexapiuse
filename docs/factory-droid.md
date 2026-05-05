@@ -43,6 +43,7 @@ Provider: OpenAI / OpenAI-compatible
 Base URL: http://127.0.0.1:3145/v1
 API key: anything
 Model: work-gpt-5.5-medium
+Image support: enabled
 ```
 
 Use the account/model/reasoning alias from `cau models` as the model name.
@@ -69,7 +70,7 @@ Example:
       "apiKey": "codexapiuse-local",
       "provider": "openai",
       "maxOutputTokens": 16384,
-      "noImageSupport": true
+      "noImageSupport": false
     },
     {
       "model": "work-gpt-5.5-medium",
@@ -78,7 +79,7 @@ Example:
       "apiKey": "codexapiuse-local",
       "provider": "openai",
       "maxOutputTokens": 16384,
-      "noImageSupport": true
+      "noImageSupport": false
     },
     {
       "model": "personal-gpt-5.5-medium",
@@ -87,13 +88,17 @@ Example:
       "apiKey": "codexapiuse-local",
       "provider": "openai",
       "maxOutputTokens": 16384,
-      "noImageSupport": true
+      "noImageSupport": false
     }
   ]
 }
 ```
 
 Use any string for `apiKey` unless you start `codexapiuse` with `CODEXAPIUSE_API_KEY`. If you do set `CODEXAPIUSE_API_KEY`, use that same value here.
+
+Keep `noImageSupport` set to `false` (or remove the field) for Factory Droid image attachments. If it is `true`, Droid disables image paste/upload before the request reaches `codexapiuse`.
+
+`codexapiuse` also advertises image-capable metadata from `GET /v1/models`, including `input: ["text", "image"]`, for clients that infer capabilities from model listings.
 
 ## Optional local API key
 

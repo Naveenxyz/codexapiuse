@@ -114,6 +114,7 @@ Provider: OpenAI / OpenAI-compatible
 Base URL: http://127.0.0.1:3145/v1
 API key: anything
 Model: work-gpt-5.5-medium
+Image support: enabled / noImageSupport=false
 ```
 
 ## Commands
